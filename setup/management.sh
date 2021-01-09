@@ -25,7 +25,12 @@ done
 #
 # certbot installs EFF's certbot which we use to
 # provision free TLS certificates.
-apt_install duplicity python3-pip virtualenv certbot
+apt_install duplicity python3-pip virtualenv snapd
+snap install core
+snap refresh core
+snap install --classic certbot
+ln -s /snap/bin/certbot /usr/bin/certbot
+
 # b2sdk is used for backblaze backups.
 # boto is used for amazon aws backups.
 # Both are installed outside the pipenv, so they can be used by duplicity
