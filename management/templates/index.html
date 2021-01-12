@@ -9,7 +9,7 @@
 
         <meta name="robots" content="noindex, nofollow">
 
-        <link rel="stylesheet" href="/admin/assets/bootstrap/css/bootstrap.min.css">
+        <link rel="stylesheet" href="/miab/assets/bootstrap/css/bootstrap.min.css">
         <style>
 	    body {
 		overflow-y: scroll;
@@ -63,7 +63,7 @@
 	       margin-bottom: 1em;
 	    }
         </style>
-        <link rel="stylesheet" href="/admin/assets/bootstrap/css/bootstrap-theme.min.css">
+        <link rel="stylesheet" href="/miab/assets/bootstrap/css/bootstrap-theme.min.css">
     </head>
     <body>
 
@@ -93,7 +93,7 @@
                 <li class="dropdown-header">Advanced Pages</li>
                 <li><a href="#custom_dns" onclick="return show_panel(this);">Custom DNS</a></li>
                 <li><a href="#external_dns" onclick="return show_panel(this);">External DNS</a></li>
-                <li><a href="/admin/munin" target="_blank">Munin Monitoring</a></li>
+                <li><a href="/miab/munin" target="_blank">Munin Monitoring</a></li>
               </ul>
             </li>
             <li class="dropdown">
@@ -198,8 +198,8 @@
           </div>
         </div>
 
-        <script src="/admin/assets/jquery.min.js"></script>
-        <script src="/admin/assets/bootstrap/js/bootstrap.min.js"></script>
+        <script src="/miab/assets/jquery.min.js"></script>
+        <script src="/miab/assets/bootstrap/js/bootstrap.min.js"></script>
 
         <script>
 var global_modal_state = null;
@@ -333,7 +333,7 @@ function api(url, method, data, callback, callback_error, headers) {
   }
 
   ajax_with_indicator({
-    url: "/admin" + url,
+    url: "/miab" + url,
     method: method,
     cache: false,
     data: data,
