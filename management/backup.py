@@ -12,7 +12,7 @@ import dateutil.parser, dateutil.relativedelta, dateutil.tz
 import rtyaml
 from exclusiveprocess import Lock
 
-from utils import load_environment, shell, wait_for_service, fix_boto
+from utils import load_environment, shell, wait_for_service
 
 rsync_ssh_options = [
 	"--ssh-options= -i /root/.ssh/id_rsa_miab",
@@ -64,7 +64,7 @@ def backup_status(env):
 		"--archive-dir", backup_cache_dir,
 		"--gpg-options", "--cipher-algo=AES256",
 		"--log-fd", "1",
-		config["target"],
+		get_duplicity_target(config),
 		] + rsync_ssh_options,
 		get_env(env),
 		trap=True)
@@ -208,6 +208,9 @@ def get_env(env):
 
 def get_target_type(config):
 	protocol = config["target"].split(":")[0]
+	if protocol == "s3+http":
+		protocol = "s3"
+
 	return protocol
 
 def perform_backup(full_backup):
@@ -273,7 +276,7 @@ def perform_backup(full_backup):
 			"--volsize", "250",
 			"--gpg-options", "--cipher-algo=AES256",
 			env["STORAGE_ROOT"],
-			config["target"],
+			get_duplicity_target(config),
 			"--allow-source-mismatch"
 			] + rsync_ssh_options,
 			get_env(env))
@@ -292,7 +295,7 @@ def perform_backup(full_backup):
 		"--verbosity", "error",
 		"--archive-dir", backup_cache_dir,
 		"--force",
-		config["target"]
+		get_duplicity_target(config)
 		] + rsync_ssh_options,
 		get_env(env))
 
@@ -307,7 +310,7 @@ def perform_backup(full_backup):
 		"--verbosity", "error",
 		"--archive-dir", backup_cache_dir,
 		"--force",
-		config["target"]
+		get_duplicity_target(config)
 		] + rsync_ssh_options,
 		get_env(env))
 
@@ -345,7 +348,7 @@ def run_duplicity_verification():
 		"--compare-data",
 		"--archive-dir", backup_cache_dir,
 		"--exclude", backup_root,
-		config["target"],
+		get_duplicity_target(config),
 		env["STORAGE_ROOT"],
 	] + rsync_ssh_options, get_env(env))
 
@@ -353,11 +356,12 @@ def run_duplicity_restore(args):
 	env = load_environment()
 	config = get_backup_config(env)
 	backup_cache_dir = os.path.join(env["STORAGE_ROOT"], 'backup', 'cache')
+
 	shell('check_call', [
 		"/usr/bin/duplicity",
 		"restore",
 		"--archive-dir", backup_cache_dir,
-		config["target"],
+		get_duplicity_target(config),
 		] + rsync_ssh_options + args,
 	get_env(env))
 
@@ -414,48 +418,70 @@ def list_target_files(config):
 						"from mailinabox sources to debug the issue."
 			raise ValueError("Connection to rsync host failed: {}".format(reason))
 
-	elif target.scheme == "s3":
-		# match to a Region
-		fix_boto() # must call prior to importing boto
-		import boto.s3
-		from boto.exception import BotoServerError
-		custom_region = False
-		for region in boto.s3.regions():
-			if region.endpoint == target.hostname:
-				break
-		else:
-			# If region is not found this is a custom region
-			custom_region = True
+	elif target.scheme == "s3" or target.scheme == "s3+http":
+		import botocore
+		import boto3
 
-		bucket = target.path[1:].split('/')[0]
+		# take the endpoint url from the target
+		endpoint_url = target.hostname
+
+		# but if the target used http/https scheme in endpoint
+		if target.netloc == "http:" or target.netloc == "https:":
+			try:
+				# parse target again without s3 schema to get correct path
+				target = urllib.parse.urlparse(config["target"][5:])
+				endpoint_url = target.scheme + "://" + target.hostname
+			except ValueError:
+				return "invalid target"
+
+		# extract name of bucket from path
+		bucket_name = target.path[1:].split('/')[0]
 		path = '/'.join(target.path[1:].split('/')[1:]) + '/'
 
-		# Create a custom region with custom endpoint
-		if custom_region:
-			from boto.s3.connection import S3Connection
-			region = boto.s3.S3RegionInfo(name=bucket, endpoint=target.hostname, connection_cls=S3Connection)
+		# set region if required
+		region_name = target.fragment.strip()
+		if region_name != "":
+			boto3.setup_default_session(region_name=region_name)
 
-		# If no prefix is specified, set the path to '', otherwise boto won't list the files
+		# if target scheme points to Amazon S3, i.e. without host
+		if target.scheme == "s3+http":
+			bucket_name = target.netloc
+			path = '/'.join(target.path.split('/')[1:]) + '/'
+			endpoint_url = None
+			if region_name == "":
+				raise ValueError("Enter Amazon S3 region or Host / Endpoint")
+		else:
+			# extract name of bucket from path
+			bucket_name = target.path[1:].split('/')[0]
+			path = '/'.join(target.path[1:].split('/')[1:]) + '/'
+
+		if bucket_name == "":
+			raise ValueError("Enter an S3 bucket name.")
+
+		# configure s3 client
+		s3 = boto3.client(
+			service_name='s3',
+			endpoint_url=endpoint_url,
+			aws_access_key_id=config["target_user"],
+			aws_secret_access_key=config["target_pass"],
+		)
+
+		# If no prefix is specified, set the path to '', otherwise boto3 won't list the files
 		if path == '/':
 			path = ''
 
-		if bucket == "":
-			raise ValueError("Enter an S3 bucket name.")
-
-		# connect to the region & bucket
+		# connect to the backet to get contents
 		try:
-			conn = region.connect(aws_access_key_id=config["target_user"], aws_secret_access_key=config["target_pass"])
-			bucket = conn.get_bucket(bucket)
-		except BotoServerError as e:
-			if e.status == 403:
-				raise ValueError("Invalid S3 access key or secret access key.")
-			elif e.status == 404:
-				raise ValueError("Invalid S3 bucket name.")
-			elif e.status == 301:
-				raise ValueError("Incorrect region for this bucket.")
-			raise ValueError(e.reason)
+			bucket = s3.list_objects(Bucket=bucket_name, Prefix=path)
+			contents = bucket['Contents'] if 'Contents' in bucket else []
+		except botocore.exceptions.ClientError as e:
+			raise ValueError(str(e))
+		except botocore.exceptions.ParamValidationError as e:
+			raise ValueError('The parameters you provided are incorrect: {}'.format(str(e)))
+		except BaseException as e:
+			raise ValueError(str(e))
 
-		return [(key.name[len(path):], key.size) for key in bucket.list(prefix=path)]
+		return [(key['Key'][len(path):], key['Size']) for key in contents]
 	elif target.scheme == 'b2':
 		from b2sdk.v1 import InMemoryAccountInfo, B2Api
 		from b2sdk.v1.exception import NonExistentBucket
@@ -547,6 +573,16 @@ def write_backup_config(env, newconfig):
 	backup_root = os.path.join(env["STORAGE_ROOT"], 'backup')
 	with open(os.path.join(backup_root, 'custom.yaml'), "w") as f:
 		f.write(rtyaml.dump(newconfig))
+
+def get_duplicity_target(config):
+	# clean target for s3 from http/https scheme and region name required by boto3
+	target = config["target"]
+	if target[0:3] == "s3:":
+		target = re.sub(r"#.+$", "", re.sub(r"^s3://https?://", "s3://", target))
+	elif target[0:8] == "s3+http:":
+		target = re.sub(r"#.+$", "", target)
+
+	return target
 
 if __name__ == "__main__":
 	import sys

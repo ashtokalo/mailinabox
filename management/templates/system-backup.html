@@ -78,24 +78,28 @@
     </div>
   </div>
   <div class="form-group backup-target-s3">
-    <label for="backup-target-s3-host-select" class="col-sm-2 control-label">S3 Region</label>
+    <label for="backup-target-s3-region" class="col-sm-2 control-label">S3 Region</label>
     <div class="col-sm-8">
-      <select class="form-control" rows="1" id="backup-target-s3-host-select">
-        {% for name, host in backup_s3_hosts %}
-          <option value="{{host}}">{{name}}</option>
+      <div style="display:flex">
+      <input type="text" placeholder="Region, e.g. us-east-1" class="form-control" rows="1" id="backup-target-s3-region">
+      <select class="form-control" rows="1" id="backup-target-s3-region-select" style="max-width:33%">
+          <option value="" disabled="disabled" selected="selected">Amazon Regions</option>
+        {% for region in amazon_regions %}
+          <option value="{{region}}">{{region}}</option>
         {% endfor %}
         <option value="other">Other</option>
       </select>
+      </div>
     </div>
   </div>
   <div class="form-group backup-target-s3">
     <label for="backup-target-s3-host" class="col-sm-2 control-label">S3 Host / Endpoint</label>
     <div class="col-sm-8">
-      <input type="text" placeholder="Endpoint" class="form-control" rows="1" id="backup-target-s3-host">
+      <input type="text" placeholder="Endpoint, keep blank for Amazon" class="form-control" rows="1" id="backup-target-s3-host">
     </div>
   </div>
   <div class="form-group backup-target-s3">
-    <label for="backup-target-s3-path" class="col-sm-2 control-label">S3 Path</label>
+    <label for="backup-target-s3-path" class="col-sm-2 control-label">S3 Bucket / Path</label>
     <div class="col-sm-8">
       <input type="text" placeholder="your-bucket-name/backup-directory" class="form-control" rows="1" id="backup-target-s3-path">
     </div>
@@ -265,12 +269,23 @@ function show_custom_backup() {
           $("#backup-target-rsync-user").val(host_parts[0]);
           $("#backup-target-rsync-host").val(host_parts[1]);
           $("#backup-target-rsync-path").val('/'+path[0]);
-        } else if (r.target.substring(0, 5) == "s3://") {
+        } else if (r.target.match(/^s3(\+http|:\/\/)/)) {
           $("#backup-target-type").val("s3");
           var hostpath = r.target.substring(5).split('/');
           var host = hostpath.shift();
+          if (r.target.substr(0, 8) == 's3+http:') {
+              host = hostpath.shift();
+          }
+          else if (host == 'http:' || host == 'https:') {
+              host = host + '/' + hostpath.shift() + '/' + hostpath.shift();
+          }
+          var path = hostpath.join('/'),
+              path_region = path.match(/#(.+)$/),
+              region = path_region ? path_region[1] : '';
+          if (region) path = path.substring(0, path.length - 1 - region.length);
+          $("#backup-target-s3-region").val(region);
           $("#backup-target-s3-host").val(host);
-          $("#backup-target-s3-path").val(hostpath.join('/'));
+          $("#backup-target-s3-path").val(path);
         } else if (r.target.substring(0, 5) == "b2://") {
           $("#backup-target-type").val("b2");
           var targetPath = r.target.substring(5);
@@ -293,9 +308,13 @@ function set_custom_backup() {
   var target;
   if (target_type == "local" || target_type == "off")
     target = target_type;
-  else if (target_type == "s3")
-    target = "s3://" + $("#backup-target-s3-host").val() + "/" + $("#backup-target-s3-path").val();
-  else if (target_type == "rsync") {
+  else if (target_type == "s3") {
+    var host = $("#backup-target-s3-host").val().trim(),
+        region = $("#backup-target-s3-region").val().trim();
+    target = (host != "" ? ("s3://" + host + "/") : ("s3+http://")) 
+        + $("#backup-target-s3-path").val()
+        + (region != "" ? ("#" + region) : "");
+  } else if (target_type == "rsync") {
     target = "rsync://" + $("#backup-target-rsync-user").val() + "@" + $("#backup-target-rsync-host").val()
                                                                 + "/" + $("#backup-target-rsync-path").val();
     target_user = '';
@@ -329,18 +348,12 @@ function set_custom_backup() {
 }
 
 function init_inputs(target_type) {
-  function set_host(host) {
-    if(host !== 'other') {
-      $("#backup-target-s3-host").val(host);
-    } else {
-      $("#backup-target-s3-host").val('');
-    }
-  }
   if (target_type == "s3") {
-    $('#backup-target-s3-host-select').off('change').on('change', function() {
-      set_host($('#backup-target-s3-host-select').val());
+    $('#backup-target-s3-region-select').off('change').on('change', function() {
+      $('#backup-target-s3-region').val($('#backup-target-s3-region-select').val());
+      $('#backup-target-s3-host').val('');
+      $('#backup-target-s3-host-select').prop('selectedIndex',0);
     });
-    set_host($('#backup-target-s3-host-select').val());
   }
 }
 </script>

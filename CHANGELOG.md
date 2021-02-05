@@ -11,6 +11,7 @@ In Development
 * Fixed a control panel startup bug on some systems.
 * Fixed the MTA-STS policy file's line endings.
 * Nextcloud's photos, dashboard, and activity apps are disabled since we only support contacts and calendar.
+* Replacing boto with boto3 to work better with S3 storages.
 
 v0.51 (November 14, 2020)
 -------------------------
